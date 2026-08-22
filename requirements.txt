@@ -1,0 +1,10 @@
+ultralytics
+opencv-python-headless
+pillow
+google-generativeai
+streamlit
+langchain
+langchain-community
+sentence-transformers
+faiss-cpu
+pypdf

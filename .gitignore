@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+temp_uploaded.jpg
+.env
+.venv
+venv/
+*.pt
