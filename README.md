@@ -52,8 +52,5 @@ Open the local URL provided in your terminal (usually `http://localhost:8501`) t
 
 ---
 
-## 🧠 Architecture (Concept → Why → How)
-For a detailed breakdown of the technical decisions, logic, and code structure of this project, please read the [Concept_Sheet.md](Concept_Sheet.md) included in this repository. 
-
 ---
 *Built by Bilal Ahmed*
