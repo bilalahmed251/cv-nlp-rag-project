@@ -1,6 +1,6 @@
 # 👷‍♂️ AI Visual Compliance System (CV-NLP RAG)
 
-![Sample Input Image](test_worker_no_helmet.png)
+![AI Visual Compliance System Banner](github_banner.png)
 
 A multi-modal Artificial Intelligence pipeline that combines **Computer Vision** and **Retrieval-Augmented Generation (RAG)** to automate safety compliance monitoring on construction sites.
 
