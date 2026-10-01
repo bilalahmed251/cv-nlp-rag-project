@@ -7,39 +7,32 @@ from nlp_engine import NLPEngine
 from dotenv import load_dotenv
 import database
 
-# Initialize SQLite Database for logs
 database.init_db()
-
-
 
 load_dotenv()
 
-# Set page configuration for a professional look
 st.set_page_config(
     page_title="AI Visual Compliance System",
     page_icon="👷‍♂️",
     layout="wide"
 )
 
-# --- Caching Heavy Models ---
 @st.cache_resource
 def get_cv_engine():
-    return CVEngine(model_name="best.pt")
+    return CVEngine(model_name="yolov8n.pt")
 
 @st.cache_resource
 def get_rag_engine():
     return RAGEngine()
 
-# --- Sidebar Configuration ---
 st.sidebar.title("⚙️ System Configuration")
 api_key_input = st.sidebar.text_input(
     "Google Gemini API Key:",
     value=os.getenv("GEMINI_API_KEY", ""),
     type="password",
-    help="Enter your Gemini API key (or set it in .env file)"
+    help="Enter your Gemini API key"
 )
 
-# Use entered API key
 api_key = api_key_input or os.getenv("GEMINI_API_KEY")
 
 if api_key:
@@ -61,7 +54,6 @@ st.sidebar.subheader("📄 Dynamic Policy (RAG)")
 uploaded_policy = st.sidebar.file_uploader("Upload custom safety policy", type=["pdf", "txt"])
 
 if uploaded_policy is not None:
-    # Check if this specific file was already processed in this session
     if st.session_state.get('last_uploaded_policy') != uploaded_policy.name:
         with st.sidebar.status("Adding policy to Knowledge Base..."):
             temp_policy_path = os.path.join("data", uploaded_policy.name)
@@ -80,7 +72,6 @@ if uploaded_policy is not None:
     else:
         st.sidebar.success(f"Policy '{uploaded_policy.name}' is active.")
 
-# --- App Title and Description ---
 st.title("👷‍♂️ AI Visual Compliance System")
 st.markdown("""
 This end-to-end system combines **Computer Vision (YOLOv8)** to detect safety gear with a 
@@ -88,12 +79,8 @@ This end-to-end system combines **Computer Vision (YOLOv8)** to detect safety ge
 """)
 st.divider()
 
-
-
-# --- Main 2-Column Layout ---
 col1, col2 = st.columns([1, 1])
 
-# --- Column 1: Image Upload & CV Detection ---
 with col1:
     st.header("1. Upload Vision Data")
     uploaded_file = st.file_uploader("Upload an image or video of the worker/site", type=["jpg", "jpeg", "png", "mp4", "mov", "avi"])
@@ -102,7 +89,6 @@ with col1:
         file_ext = uploaded_file.name.split(".")[-1].lower()
         is_video = file_ext in ["mp4", "mov", "avi"]
         
-        # Display the uploaded file preview
         if not is_video:
             image = Image.open(uploaded_file)
             st.image(image, caption="Uploaded Image", use_container_width=True)
@@ -116,7 +102,6 @@ with col1:
                 cv_engine = get_cv_engine()
                 
                 if not is_video:
-                    # --- IMAGE PROCESSING ---
                     temp_path = "temp_uploaded.jpg"
                     image.save(temp_path)
                     
@@ -134,7 +119,6 @@ with col1:
                         
                         st.session_state['cv_detections'] = detections
                 else:
-                    # --- VIDEO PROCESSING ---
                     temp_path = "temp_uploaded." + file_ext
                     with open(temp_path, "wb") as f:
                         f.write(uploaded_file.getbuffer())
@@ -145,14 +129,12 @@ with col1:
                     table_placeholder = st.empty()
                     final_detections = []
                     
-                    # Iterate over frames yielded by the CV engine
                     for annotated_frame, current_detections, workers, progress in cv_engine.analyze_video(temp_path, conf_threshold=conf_threshold):
                         progress_bar.progress(progress)
                         if annotated_frame is not None:
                             frame_placeholder.image(annotated_frame, channels="RGB", use_container_width=True)
                             
                         if workers:
-                            # Show real-time worker status table for the video
                             table_placeholder.dataframe(
                                 [
                                     {
@@ -165,11 +147,9 @@ with col1:
                                 use_container_width=True,
                                 hide_index=True,
                             )
-                            # Process each worker for continuous tracking
                             for w in workers:
                                 database.process_worker_status(w["worker_id"], w["status"], annotated_frame)
                             
-                            # Cleanup ghost incidents (workers who left the frame)
                             database.cleanup_ghosts()
                                 
                         final_detections = current_detections
@@ -185,7 +165,6 @@ with col1:
                             
                         st.session_state['cv_detections'] = final_detections
 
-# --- Column 2: RAG + LLM Compliance Query ---
 with col2:
     st.header("2. AI Compliance Reasoning")
     user_query = st.text_input(
@@ -198,10 +177,8 @@ with col2:
             st.error("Please upload an image first!")
         else:
             with st.spinner("Running RAG Retrieval & Gemini LLM Reasoning..."):
-                # Step 1: Ensure CV analysis has been performed
                 detections = st.session_state.get('cv_detections', None)
                 if detections is None:
-                    # Automatically run CV Engine if user clicked Analyze directly
                     file_ext = uploaded_file.name.split(".")[-1].lower()
                     is_video = file_ext in ["mp4", "mov", "avi"]
                     cv_engine = get_cv_engine()
@@ -219,28 +196,22 @@ with col2:
                             
                     st.session_state['cv_detections'] = detections
                 
-                # Step 2: RAG Engine - Retrieve Relevant Policy Chunks
                 rag_engine = get_rag_engine()
                 policy_context = rag_engine.query_policies(user_query, top_k=3)
                 
-                # Display Retrieved Policy Context in Expander
                 with st.expander("📖 View Retrieved Policy Rules (RAG Context)"):
                     st.markdown(policy_context)
                 
-                # Step 3: LLM Reasoning - Generate Final Report
                 nlp_engine = NLPEngine(api_key=api_key)
                 report = nlp_engine.analyze_compliance(user_query, detections, policy_context)
                 
-                # Step 4: Display Final Compliance Report
                 st.subheader("📋 AI Compliance Report")
                 st.markdown(report)
 
-# --- Incident Logs (Database) ---
 st.divider()
 st.header("🚨 Incident Logs & Snapshots")
 st.caption("Auto-generated logs of safety violations detected during video/webcam monitoring.")
 
-# Add a refresh button so user can manually refresh logs while camera is running
 if st.button("🔄 Refresh Logs"):
     pass
 
@@ -251,12 +222,5 @@ if not logs_df.empty:
         use_container_width=True,
         hide_index=True
     )
-    
-    # st.subheader("Recent Violation Snapshots")
-    # cols = st.columns(3)
-    # for idx, row in logs_df.head(3).iterrows():
-    #     if os.path.exists(row['screenshot_path']):
-    #         with cols[idx % 3]:
-    #             st.image(row['screenshot_path'], caption=f"Worker {row['worker_id']} - {row['incident_state']} ({row['duration_seconds']}s)", use_container_width=True)
 else:
     st.info("No violations logged yet.")

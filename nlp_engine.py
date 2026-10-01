@@ -1,99 +1,119 @@
-import google.generativeai as genai
 import os
+from google import genai
+
+import time
+import random
+from google.genai import errors
 
 class NLPEngine:
     def __init__(self, api_key=None):
-        """
-        Initializes the NLP engine.
-        Connects to Gemini LLM to reason over Vision Detections and RAG Policy Context.
-        """
         print("Initializing NLP Engine (The Brain)...")
-        
-        # Priority: Passed API Key -> Environment Variable
         self.api_key = api_key or os.getenv("GEMINI_API_KEY")
         
         if not self.api_key:
             print("WARNING: No Gemini API Key found.")
+            self.client = None
             return
             
-        genai.configure(api_key=self.api_key)
-        
-        # Fallback list of models supported by current API
-        model_candidates = ['gemini-1.5-flash', 'gemini-1.5-pro']
-        self.model = None
-        
-        for m_name in model_candidates:
+        try:
+            self.client = genai.Client(api_key=self.api_key)
+            print(f"[Info] Connected successfully to Google GenAI client.")
+            print("[Info] Available Models:")
             try:
-                candidate = genai.GenerativeModel(m_name)
-                # Test quick model ping
-                self.model = candidate
-                self.model_name = m_name
-                print(f"[Info] Connected successfully to model: {m_name}")
-                break
+                for m in self.client.models.list():
+                    if 'gemini' in m.name.lower():
+                        print(f"  - {m.name}")
             except Exception as e:
-                continue
+                print(f"[Warning] Could not list models: {e}")
+        except Exception as e:
+            print(f"[Error] Failed to initialize GenAI client: {e}")
+            self.client = None
 
-        if not self.model:
-            self.model = genai.GenerativeModel('gemini-1.5-flash')
-            self.model_name = 'gemini-1.5-flash'
+    def _generate(self, prompt: str, retries: int = 3) -> str:
+        primary_model = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
+        fallback_model = os.getenv("GEMINI_FALLBACK_MODEL", "gemini-2.5-flash")
+        
+        models_to_try = []
+        if primary_model: models_to_try.append(primary_model)
+        if fallback_model and fallback_model not in models_to_try: models_to_try.append(fallback_model)
+        
+        last_error = None
+        for model in models_to_try:
+            for attempt in range(retries + 1):
+                try:
+                    response = self.client.models.generate_content(model=model, contents=prompt)
+                    return response.text
+                except errors.APIError as e:
+                    last_error = e
+                    if e.code == 404:
+                        print(f"[Warning] Model {model} not found (404). Skipping to next model.")
+                        break # Skip to next model
+                    elif e.code in [429, 500, 503, 504]:
+                        if attempt < retries:
+                            sleep_time = (2 ** attempt) + random.random()
+                            print(f"[Warning] API error {e.code} on {model}. Retrying in {sleep_time:.2f}s...")
+                            time.sleep(sleep_time)
+                        else:
+                            print(f"[Error] Max retries reached for model {model} due to error {e.code}.")
+                    else:
+                        raise e # Other API errors
+                        
+        if last_error:
+            raise last_error
+        raise Exception("All models and retries failed.")
 
     def analyze_compliance(self, user_query: str, cv_detections: list, policy_context: str) -> str:
-        """
-        Combines User Question + Computer Vision Detections + RAG Policy Context
-        to generate a comprehensive AI Compliance Report.
-        """
-        if not self.api_key:
-            return "⚠️ **Error:** Gemini API Key is missing. Please enter your API key."
+        if not self.client:
+            return "⚠️ **Error:** Gemini API Key is missing or client failed to initialize."
 
-        # Format CV detections into a clean string
         if cv_detections:
             detected_items = [f"{item['object']} (Confidence: {item.get('confidence', 'N/A')}%)" for item in cv_detections]
             objects_str = ", ".join(detected_items)
-        else:
-            objects_str = "No specific objects detected by camera."
-
-        # Construct the Multi-modal RAG Prompt
-        prompt = f"""
-You are an expert AI Construction Safety Officer. Analyze the following site situation.
+            
+            prompt = f"""
+You are an expert AI Construction Safety Officer. Analyze the following site situation based on the camera detections.
 
 ### INPUT DATA:
 - **User Question:** {user_query}
-- **Camera Detections (Computer Vision):** {objects_str}
+- **Camera Detections:** {objects_str}
 
 ### RETRIEVED COMPANY SAFETY POLICIES (RAG Context):
 {policy_context}
 
 ---
-
 ### INSTRUCTIONS FOR YOUR REPORT:
 Please provide a clear, structured Safety Compliance Report in Markdown containing:
 1. **Compliance Verdict:** (COMPLIANT / VIOLATION DETECTED / UNCERTAIN)
 2. **Risk Level:** (LOW / MEDIUM / HIGH / CRITICAL)
-3. **Detailed Explanation:** Explain the finding by explicitly referencing the camera detections AND the retrieved policy section numbers/penalties.
-4. **Citations:** Provide the exact source file and page number from the RAG context that supports your reasoning.
+3. **Detailed Explanation:** Explain the finding by explicitly referencing the camera detections AND the retrieved policy.
+4. **Citations:** Provide the exact source file from the RAG context.
 5. **Recommended Actions:** What should the site supervisor or worker do immediately?
 """
+        else:
+            prompt = f"""
+You are an expert AI Construction Safety Officer. The user is asking a general safety policy question.
 
-        print(f"[Info] Sending structured RAG + CV prompt to Gemini LLM ({self.model_name})...")
+### INPUT DATA:
+- **User Question:** {user_query}
+
+### RETRIEVED COMPANY SAFETY POLICIES (RAG Context):
+{policy_context}
+
+---
+### INSTRUCTIONS:
+Answer the user's question directly and professionally using ONLY the provided RAG Context. 
+Do not ask for camera detections. Just explain the safety rule, penalty, or procedure as requested.
+If the context doesn't contain the answer, politely state that it's not in the current safety policies.
+"""
+
+        print(f"[Info] Sending structured RAG prompt to Gemini LLM...")
         
-        models_to_try = [self.model_name, 'gemini-1.5-flash']
-        models_to_try = list(dict.fromkeys(models_to_try)) # deduplicate
-        
-        last_error = None
-        for m_name in models_to_try:
-            try:
-                print(f"[Info] Trying model: {m_name}...")
-                model = genai.GenerativeModel(m_name)
-                response = model.generate_content(prompt)
-                return response.text
-            except Exception as e:
-                print(f"[Warning] Failed with {m_name}: {e}")
-                last_error = e
-                
-        return f"⚠️ **Error communicating with Gemini LLM:** {last_error}"
+        try:
+            return self._generate(prompt)
+        except Exception as e:
+            print(f"[Error] Gemini generation failed: {e}")
+            return f"The AI model is temporarily busy. Here are the relevant policy excerpts:\n\n{policy_context}"
 
-
-# --- Test script if run directly ---
 if __name__ == "__main__":
     from dotenv import load_dotenv
     load_dotenv()

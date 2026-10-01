@@ -4,42 +4,35 @@ from ultralytics import YOLO
 class CVEngine:
     def __init__(self, model_name='best.pt'):
         """
-        Initializes the Computer Vision engine with your custom trained YOLOv8 model.
-        'best.pt' contains the specific knowledge of helmets vs no_helmets.
+        Initializes the Computer Vision engine with the specified YOLOv8 model.
         """
         print(f"Loading {model_name}...")
         self.model = YOLO(model_name)
 
     def analyze_image(self, image_path, conf_threshold=0.15):
         """
-        Takes an image path, runs object detection with a high-recall confidence threshold,
+        Takes an image path, runs object detection with a confidence threshold,
         and returns a summary of findings along with the annotated image array.
         """
         print(f"Analyzing {image_path} with confidence threshold {conf_threshold}...")
         
-        # Run inference with confidence threshold 0.15 for high sensitivity
         results = self.model(image_path, conf=conf_threshold)
         
         annotated_img_rgb = None
         if len(results) > 0:
-            # plot() returns a BGR numpy array containing bounding boxes
             annotated_img_bgr = results[0].plot()
-            # Convert BGR to RGB for Streamlit/PIL display
             annotated_img_rgb = annotated_img_bgr[..., ::-1]
             
-        # Parse the results
         detections = self._parse_and_associate_detections(results)
         
         return detections, annotated_img_rgb
 
     @staticmethod
     def _box_center(box):
-        """Return the centre point of an xyxy bounding box."""
         x1, y1, x2, y2 = box
         return (x1 + x2) / 2, (y1 + y2) / 2
 
     def _find_matching_gear(self, person, gear_items, used_indexes):
-        """Find the closest unused PPE detection in the upper area of one person."""
         px1, py1, px2, py2 = person["box"]
         upper_body_limit = py1 + (py2 - py1) * 0.55
         person_center_x = (px1 + px2) / 2
@@ -59,10 +52,8 @@ class CVEngine:
         return index, gear
 
     def _build_compliance_data(self, results):
-        """Convert YOLO boxes into display detections and one PPE status per worker."""
         """
-        Associate helmet detections with person boxes.  When tracking is enabled,
-        Ultralytics supplies a stable ``track_id`` for each worker across frames.
+        Associate helmet detections with person boxes and evaluate compliance.
         """
         detections_list = []
         persons = []
@@ -77,7 +68,6 @@ class CVEngine:
             confidence = float(box.conf[0])
             class_name = self.model.names[class_id]
             
-            # Get bounding box coordinates [x1, y1, x2, y2]
             x1, y1, x2, y2 = box.xyxy[0].tolist()
             track_id = int(box.id[0]) if box.id is not None else None
             det_info = {
@@ -91,20 +81,17 @@ class CVEngine:
                 persons.append(det_info)
             elif class_name == "helmet":
                 helmets.append(det_info)
-            elif class_name == "no_helmet" or class_name == "no-helmet":
+            elif class_name in ["no_helmet", "no-helmet"]:
                 no_helmets.append(det_info)
             else:
                 detections_list.append({"object": class_name, "confidence": round(confidence * 100, 2)})
 
         workers = []
-
-        # A gear box must be assigned to at most one person in a frame.
         used_helmets = set()
         used_no_helmets = set()
 
         if persons:
             for worker_number, person in enumerate(persons, start=1):
-                # Safety-first rule: an explicit no-helmet detection takes priority.
                 no_helmet_index, no_helmet = self._find_matching_gear(
                     person, no_helmets, used_no_helmets
                 )
@@ -141,7 +128,6 @@ class CVEngine:
                     "confidence": worker["equipment_confidence"] or worker["person_confidence"],
                 })
         else:
-            # Fallback if model only detects helmet/no_helmet as heads (no person box)
             for idx, h in enumerate(helmets, start=1):
                 detections_list.append({"object": "Worker with Helmet", "confidence": round(h["conf"] * 100, 2)})
                 workers.append({
@@ -162,7 +148,6 @@ class CVEngine:
         return detections_list, workers
 
     def _parse_and_associate_detections(self, results):
-        """Backwards-compatible summary used by image and uploaded-video analysis."""
         detections, _ = self._build_compliance_data(results)
         return detections
 
@@ -199,7 +184,7 @@ class CVEngine:
     def analyze_video(self, video_path, conf_threshold=0.15, frame_skip=5):
         """
         Reads a video file frame-by-frame, runs object detection, and yields 
-        the annotated RGB frame along with cumulative detections so far and progress.
+        the annotated RGB frame along with cumulative detections.
         """
         print(f"Analyzing video {video_path} with confidence threshold {conf_threshold}...")
         cap = cv2.VideoCapture(video_path)
@@ -215,19 +200,17 @@ class CVEngine:
         while cap.isOpened():
             ret, frame = cap.read()
             if not ret:
-                break # End of video
+                break
                 
             frame_count += 1
             if frame_count % frame_skip != 0:
                 continue
                 
-            # Resize frame to max width 640 to speed up processing
             h, w = frame.shape[:2]
             if w > 640:
                 scale = 640 / w
                 frame = cv2.resize(frame, (640, int(h * scale)))
 
-            # Use ByteTrack for stable worker IDs across video frames
             results = self.model.track(
                 frame, 
                 conf=conf_threshold, 
@@ -240,13 +223,12 @@ class CVEngine:
             workers = []
             if len(results) > 0:
                 annotated_frame_bgr = results[0].plot()
-                annotated_frame_rgb = annotated_frame_bgr[..., ::-1] # Convert BGR to RGB
+                annotated_frame_rgb = annotated_frame_bgr[..., ::-1]
                 
                 current_dets, workers = self._build_compliance_data(results)
                 for det in current_dets:
                     cumulative_detections_map[det["object"]] = det
                     
-            # Convert map to list
             current_detections = list(cumulative_detections_map.values())
             progress = min(1.0, frame_count / total_frames) if total_frames > 0 else 0.0
             
@@ -254,7 +236,6 @@ class CVEngine:
             
         cap.release()
 
-# --- Test the engine if run directly ---
 if __name__ == "__main__":
     engine = CVEngine()
     print("\n--- Testing CV Engine ---")

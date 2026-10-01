@@ -3,15 +3,11 @@ from typing import List
 from langchain_community.document_loaders import PyPDFLoader, TextLoader, DirectoryLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import HuggingFaceEmbeddings
-# from langchain_community.vectorstores import Chroma
 from langchain_community.vectorstores import Chroma
 from langchain_core.documents import Document
 
-# Configurable Default Directory
 DEFAULT_POLICY_DIR = os.path.join(os.path.dirname(__file__), "data", "policies")
 
-
-# --- 1. Load Documents ---
 def load_documents(folder_path: str = DEFAULT_POLICY_DIR) -> List[Document]:
     """
     Loads all PDF and TXT safety policy documents from the specified directory.
@@ -23,14 +19,12 @@ def load_documents(folder_path: str = DEFAULT_POLICY_DIR) -> List[Document]:
 
     documents = []
     
-    # Load PDF files
     try:
         pdf_loader = DirectoryLoader(folder_path, glob="**/*.pdf", loader_cls=PyPDFLoader)
         documents.extend(pdf_loader.load())
     except Exception as e:
         print(f"[Warning] Error loading PDF files: {e}")
 
-    # Load TXT files
     try:
         txt_loader = DirectoryLoader(folder_path, glob="**/*.txt", loader_cls=TextLoader)
         documents.extend(txt_loader.load())
@@ -44,9 +38,7 @@ def load_documents(folder_path: str = DEFAULT_POLICY_DIR) -> List[Document]:
 
     return documents
 
-
-# --- 2. Split Text into Chunks ---
-def split_into_chunks(documents: List[Document], chunk_size: int = 500, chunk_overlap: int = 50) -> List[Document]:
+def split_into_chunks(documents: List[Document], chunk_size: int = 800, chunk_overlap: int = 100) -> List[Document]:
     """
     Splits long documents into smaller readable chunks with overlap for embedding.
     """
@@ -57,25 +49,20 @@ def split_into_chunks(documents: List[Document], chunk_size: int = 500, chunk_ov
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,
-        separators=["\n\n", "\n", " ", ""]
+        separators=["\n## ", "\n\n", "\n", " ", ""]
     )
     chunks = text_splitter.split_documents(documents)
     print(f"[Info] Created {len(chunks)} text chunks from documents.")
     return chunks
 
-
-# --- 3. Create Embedding Model ---
 def create_embeddings():
     """
     Initializes a lightweight, fast open-source Sentence Transformer embedding model.
     """
     print("[Info] Initializing HuggingFace Embedding model (all-MiniLM-L6-v2)...")
-    # Uses a compact model that runs fast on CPU
     embedding_model = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
     return embedding_model
 
-
-# --- 4. Build Chroma Vector Database ---
 def build_chroma_index(chunks: List[Document], embeddings) -> Chroma:
     """
     Converts text chunks into numerical vectors and builds a persistent Chroma vector index.
@@ -92,9 +79,7 @@ def build_chroma_index(chunks: List[Document], embeddings) -> Chroma:
     print("[Info] Chroma index build successful.")
     return vector_store
 
-
-# --- 5. Search Relevant Chunks ---
-def search_relevant_chunks(query: str, vector_store: Chroma, top_k: int = 3) -> List[Document]:
+def search_relevant_chunks(query: str, vector_store: Chroma, top_k: int = 4) -> List[Document]:
     """
     Searches the Chroma vector database for the top_k most relevant chunks matching the query.
     """
@@ -106,8 +91,6 @@ def search_relevant_chunks(query: str, vector_store: Chroma, top_k: int = 3) -> 
     results = vector_store.similarity_search(query, k=top_k)
     return results
 
-
-# --- Class-based Wrapper for easy integration with UI/NLP Engine ---
 class RAGEngine:
     """
     High-level RAG Engine class orchestrating document loading, vector storage, and retrieval.
@@ -119,24 +102,40 @@ class RAGEngine:
         self.initialize_engine()
 
     def initialize_engine(self):
-        """Loads documents and builds Chroma index if it does not exist."""
+        """Loads documents and builds Chroma index if it does not exist or if config changed."""
+        version_file = "./chroma_data/version.txt"
+        current_version = "chunk_size=800,chunk_overlap=100,sep=\\n## "
+        
+        rebuild_needed = True
         if os.path.exists("./chroma_data"):
-            print("[Info] Loading existing database from disk...")
-            self.vector_store = Chroma(
-                persist_directory="./chroma_data", 
-                embedding_function=self.embeddings
-            )
-        else:
-            print("[Info] No existing database found. Creating a new one...")
+            if os.path.exists(version_file):
+                with open(version_file, "r") as f:
+                    if f.read().strip() == current_version:
+                        rebuild_needed = False
+                        
+        if rebuild_needed:
+            print("[Info] Building or rebuilding database due to config change or missing DB...")
+            if os.path.exists("./chroma_data"):
+                import shutil
+                shutil.rmtree("./chroma_data", ignore_errors=True)
+                
             docs = load_documents(self.policy_folder)
             if docs:
                 chunks = split_into_chunks(docs)
                 self.vector_store = build_chroma_index(chunks, self.embeddings)
+                with open(version_file, "w") as f:
+                    f.write(current_version)
             else:
                 print("[Warning] RAG Engine initialized without documents.")
+        else:
+            print("[Info] Loading existing database from disk (version matched)...")
+            self.vector_store = Chroma(
+                persist_directory="./chroma_data", 
+                embedding_function=self.embeddings
+            )
 
     def add_document(self, file_path: str):
-        """Loads a single document, chunks it, and adds it to the FAISS index dynamically."""
+        """Loads a single document, chunks it, and adds it to the Chroma index dynamically."""
         print(f"[Info] Dynamically adding document: {file_path}")
         docs = []
         if file_path.lower().endswith(".pdf"):
@@ -169,7 +168,7 @@ class RAGEngine:
             print("[Info] Created new Chroma index with uploaded document.")
         return True
 
-    def query_policies(self, user_query: str, top_k: int = 3) -> str:
+    def query_policies(self, user_query: str, top_k: int = 4) -> str:
         """Retrieves relevant chunks and returns them concatenated as context string."""
         if not self.vector_store:
             return "No policy context available."
@@ -178,32 +177,21 @@ class RAGEngine:
         context_texts = []
         for i, doc in enumerate(relevant_chunks):
             source = doc.metadata.get('source', 'Unknown Source')
-            # Extract just the filename for cleaner display
             source_file = os.path.basename(source)
             page = doc.metadata.get('page', 'N/A')
             context_texts.append(f"--- Rule Snippet {i+1} (Source: {source_file}, Page: {page}) ---\n{doc.page_content}")
             
         return "\n\n".join(context_texts)
 
-
-# --- 6 & 7. Test script if run directly ---
 if __name__ == "__main__":
     print("\n================ RAG ENGINE TEST ================")
-    
-    # 1. Load documents
     docs = load_documents()
     
     if docs:
-        # 2. Split chunks
         chunks = split_into_chunks(docs)
-        
-        # 3. Create embeddings
         embeddings = create_embeddings()
-        
-        # 4. Build Chroma index
         vector_db = build_chroma_index(chunks, embeddings)
         
-        # 5. Test search query
         sample_query = "What is the penalty for not wearing a helmet?"
         results = search_relevant_chunks(sample_query, vector_db, top_k=2)
         
