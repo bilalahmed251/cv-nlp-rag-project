@@ -9,5 +9,5 @@ langchain-community
 langchain-text-splitters
 python-dotenv
 sentence-transformers
-faiss-cpu
+chromadb
 pypdf

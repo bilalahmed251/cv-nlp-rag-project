@@ -3,7 +3,8 @@ from typing import List
 from langchain_community.document_loaders import PyPDFLoader, TextLoader, DirectoryLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain_community.vectorstores import FAISS
+# from langchain_community.vectorstores import Chroma
+from langchain_community.vectorstores import Chroma
 from langchain_core.documents import Document
 
 # Configurable Default Directory
@@ -74,24 +75,28 @@ def create_embeddings():
     return embedding_model
 
 
-# --- 4. Build FAISS Vector Database ---
-def build_faiss_index(chunks: List[Document], embeddings) -> FAISS:
+# --- 4. Build Chroma Vector Database ---
+def build_chroma_index(chunks: List[Document], embeddings) -> Chroma:
     """
-    Converts text chunks into numerical vectors and builds an in-memory FAISS vector index.
+    Converts text chunks into numerical vectors and builds a persistent Chroma vector index.
     """
     if not chunks:
-        raise ValueError("Cannot build FAISS index with an empty list of chunks.")
+        raise ValueError("Cannot build Chroma index with an empty list of chunks.")
 
-    print("[Info] Building FAISS vector database...")
-    vector_store = FAISS.from_documents(chunks, embeddings)
-    print("[Info] FAISS index build successful.")
+    print("[Info] Building persistent Chroma vector database...")
+    vector_store = Chroma.from_documents(
+        documents=chunks, 
+        embedding=embeddings,
+        persist_directory="./chroma_data"
+    )
+    print("[Info] Chroma index build successful.")
     return vector_store
 
 
 # --- 5. Search Relevant Chunks ---
-def search_relevant_chunks(query: str, vector_store: FAISS, top_k: int = 3) -> List[Document]:
+def search_relevant_chunks(query: str, vector_store: Chroma, top_k: int = 3) -> List[Document]:
     """
-    Searches the FAISS vector database for the top_k most relevant chunks matching the query.
+    Searches the Chroma vector database for the top_k most relevant chunks matching the query.
     """
     if not vector_store:
         print("[Error] Vector store is not initialized.")
@@ -114,13 +119,21 @@ class RAGEngine:
         self.initialize_engine()
 
     def initialize_engine(self):
-        """Loads documents and builds FAISS index."""
-        docs = load_documents(self.policy_folder)
-        if docs:
-            chunks = split_into_chunks(docs)
-            self.vector_store = build_faiss_index(chunks, self.embeddings)
+        """Loads documents and builds Chroma index if it does not exist."""
+        if os.path.exists("./chroma_data"):
+            print("[Info] Loading existing database from disk...")
+            self.vector_store = Chroma(
+                persist_directory="./chroma_data", 
+                embedding_function=self.embeddings
+            )
         else:
-            print("[Warning] RAG Engine initialized without documents.")
+            print("[Info] No existing database found. Creating a new one...")
+            docs = load_documents(self.policy_folder)
+            if docs:
+                chunks = split_into_chunks(docs)
+                self.vector_store = build_chroma_index(chunks, self.embeddings)
+            else:
+                print("[Warning] RAG Engine initialized without documents.")
 
     def add_document(self, file_path: str):
         """Loads a single document, chunks it, and adds it to the FAISS index dynamically."""
@@ -150,10 +163,10 @@ class RAGEngine:
         chunks = split_into_chunks(docs)
         if self.vector_store:
             self.vector_store.add_documents(chunks)
-            print("[Info] Document added to existing FAISS index.")
+            print("[Info] Document added to existing Chroma index.")
         else:
-            self.vector_store = build_faiss_index(chunks, self.embeddings)
-            print("[Info] Created new FAISS index with uploaded document.")
+            self.vector_store = build_chroma_index(chunks, self.embeddings)
+            print("[Info] Created new Chroma index with uploaded document.")
         return True
 
     def query_policies(self, user_query: str, top_k: int = 3) -> str:
@@ -187,8 +200,8 @@ if __name__ == "__main__":
         # 3. Create embeddings
         embeddings = create_embeddings()
         
-        # 4. Build FAISS index
-        vector_db = build_faiss_index(chunks, embeddings)
+        # 4. Build Chroma index
+        vector_db = build_chroma_index(chunks, embeddings)
         
         # 5. Test search query
         sample_query = "What is the penalty for not wearing a helmet?"
