@@ -3,8 +3,11 @@ opencv-python-headless
 pillow
 google-generativeai
 streamlit
+streamlit-webrtc
 langchain
 langchain-community
+langchain-text-splitters
+python-dotenv
 sentence-transformers
 faiss-cpu
 pypdf

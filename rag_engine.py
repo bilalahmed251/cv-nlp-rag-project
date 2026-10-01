@@ -122,13 +122,54 @@ class RAGEngine:
         else:
             print("[Warning] RAG Engine initialized without documents.")
 
+    def add_document(self, file_path: str):
+        """Loads a single document, chunks it, and adds it to the FAISS index dynamically."""
+        print(f"[Info] Dynamically adding document: {file_path}")
+        docs = []
+        if file_path.lower().endswith(".pdf"):
+            try:
+                from langchain_community.document_loaders import PyPDFLoader
+                loader = PyPDFLoader(file_path)
+                docs.extend(loader.load())
+            except Exception as e:
+                print(f"[Error] Failed to load PDF: {e}")
+        elif file_path.lower().endswith(".txt"):
+            try:
+                from langchain_community.document_loaders import TextLoader
+                loader = TextLoader(file_path)
+                docs.extend(loader.load())
+            except Exception as e:
+                print(f"[Error] Failed to load TXT: {e}")
+        else:
+            print("[Error] Unsupported file format.")
+            return False
+
+        if not docs:
+            return False
+
+        chunks = split_into_chunks(docs)
+        if self.vector_store:
+            self.vector_store.add_documents(chunks)
+            print("[Info] Document added to existing FAISS index.")
+        else:
+            self.vector_store = build_faiss_index(chunks, self.embeddings)
+            print("[Info] Created new FAISS index with uploaded document.")
+        return True
+
     def query_policies(self, user_query: str, top_k: int = 3) -> str:
         """Retrieves relevant chunks and returns them concatenated as context string."""
         if not self.vector_store:
             return "No policy context available."
         
         relevant_chunks = search_relevant_chunks(user_query, self.vector_store, top_k=top_k)
-        context_texts = [f"--- Rule Snippet {i+1} ---\n" + doc.page_content for i, doc in enumerate(relevant_chunks)]
+        context_texts = []
+        for i, doc in enumerate(relevant_chunks):
+            source = doc.metadata.get('source', 'Unknown Source')
+            # Extract just the filename for cleaner display
+            source_file = os.path.basename(source)
+            page = doc.metadata.get('page', 'N/A')
+            context_texts.append(f"--- Rule Snippet {i+1} (Source: {source_file}, Page: {page}) ---\n{doc.page_content}")
+            
         return "\n\n".join(context_texts)
 
 
