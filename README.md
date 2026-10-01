@@ -1,56 +1,80 @@
 # 👷‍♂️ AI Visual Compliance System (CV-NLP RAG)
 
-![AI Visual Compliance System Banner](github_banner.png)
+![Python](https://img.shields.io/badge/python-3.9+-blue.svg)
+![YOLOv8](https://img.shields.io/badge/YOLO-v8-yellow.svg)
+![LangChain](https://img.shields.io/badge/LangChain-Integration-green.svg)
+![Gemini](https://img.shields.io/badge/AI-Google_Gemini-orange.svg)
 
-A multi-modal Artificial Intelligence pipeline that combines **Computer Vision** and **Retrieval-Augmented Generation (RAG)** to automate safety compliance monitoring on construction sites.
+<div align="center">
+  <img src="docs/github_banner.png" alt="AI Visual Compliance System Banner" width="800"/>
+</div>
 
-## 🌟 Overview
+## 📖 Executive Summary
 
-Standard object detection models can identify objects (e.g., "person", "no_helmet"), but they lack the domain-specific context to enforce company policies. This project bridges that gap by decoupling the architecture into three core engines:
+The **AI Visual Compliance System** is an advanced, multi-modal pipeline designed to automate workplace safety monitoring. By integrating **Computer Vision (CV)** with **Retrieval-Augmented Generation (RAG)** and Large Language Models (LLMs), the system not only detects safety violations in real-time but also cross-references them against company-specific safety policies to generate structured, evidence-based compliance reports.
 
-1. **The "Eyes" (CV Engine):** A custom-trained **YOLOv8** model that detects safety equipment (helmets, vests) in real-time.
-2. **The "Memory" (RAG Engine):** A Retrieval-Augmented Generation system using **LangChain, HuggingFace Embeddings, and FAISS** to instantly search and retrieve the exact company safety policy from internal PDFs/Text files.
-3. **The "Brain" (NLP Engine):** The **Google Gemini LLM** acts as an AI Safety Officer, taking the structured visual detections and the retrieved written policy to generate a logical, evidence-based compliance report.
+## ✨ Key Features
 
-Everything is wrapped in an interactive, easy-to-use **Streamlit** web application.
+*   **Real-Time Violation Detection:** Utilizes a custom-trained YOLOv8 model to accurately detect Personal Protective Equipment (PPE) compliance (e.g., helmets).
+*   **Dynamic Policy Retrieval:** Implements a RAG pipeline (LangChain, FAISS) to search and retrieve exact regulatory text from internal company documents (PDFs, TXTs).
+*   **AI Safety Officer:** Leverages Google Gemini 1.5 Flash to synthesize visual data and retrieved policies, outputting logical and explainable compliance verdicts.
+*   **Interactive Dashboard:** A user-friendly Streamlit interface for uploading footage, managing policy documents, and visualizing real-time analysis.
 
----
+## 🏗️ System Architecture
+
+The architecture is decoupled into three highly cohesive engines:
+
+1.  **The "Eyes" (CV Engine):** Processes video frames/images to extract structured metadata about detected objects and their spatial coordinates.
+2.  **The "Memory" (RAG Engine):** Converts domain-specific safety manuals into vector embeddings (HuggingFace) and performs semantic search to fetch relevant context.
+3.  **The "Brain" (NLP/LLM Engine):** Acts as the reasoning layer, taking the structured visual output and the retrieved policy context to generate a comprehensive human-readable report.
 
 ## 🛠️ Technology Stack
-*   **Computer Vision:** YOLOv8 (Ultralytics), OpenCV
-*   **NLP & Generative AI:** Google Gemini (1.5 Flash)
-*   **RAG Pipeline:** LangChain, HuggingFace (`all-MiniLM-L6-v2`), FAISS Vector Database
-*   **User Interface:** Streamlit
-*   **Language:** Python
 
----
+| Component | Technology |
+| :--- | :--- |
+| **Computer Vision** | YOLOv8 (Ultralytics), OpenCV |
+| **Generative AI** | Google Gemini (1.5 Flash API) |
+| **RAG Pipeline** | LangChain, HuggingFace (`all-MiniLM-L6-v2`) |
+| **Vector Database** | FAISS (In-memory) |
+| **Backend & UI** | Python, Streamlit |
 
-## 🚀 How to Run Locally
+## 🚀 Installation & Setup
 
-### 1. Clone the repository
+### Prerequisites
+*   Python 3.9 or higher
+*   Git
+
+### 1. Clone the Repository
 ```bash
 git clone https://github.com/bilalahmed251/cv-nlp-rag-project.git
 cd cv-nlp-rag-project
 ```
 
 ### 2. Install Dependencies
-Make sure you have Python installed, then run:
 ```bash
 pip install -r requirements.txt
 ```
 
-### 3. Setup API Keys
-You will need a Google Gemini API Key. You can either:
-- Enter the key directly into the Streamlit UI sidebar.
-- Or, create a `.env` file in the root directory and add: `GEMINI_API_KEY=your_api_key_here`
+### 3. Environment Variables
+To enable the LLM features, you must provide a Google Gemini API Key.
+Create a `.env` file in the root directory:
+```env
+GEMINI_API_KEY=your_api_key_here
+```
+*(Alternatively, you can input the key directly via the Streamlit UI).*
 
-### 4. Run the Streamlit App
+### 4. Run the Application
 ```bash
 streamlit run app.py
 ```
-Open the local URL provided in your terminal (usually `http://localhost:8501`) to interact with the application.
+Navigate to `http://localhost:8501` in your browser to access the system.
+
+## 🗺️ Roadmap (Upcoming Features)
+
+- [ ] Transition from FAISS to **ChromaDB** for persistent vector storage.
+- [ ] Migrate frontend to a robust **Next.js / React Dashboard**.
+- [ ] Implement robust **Automated Testing** (Pytest, Jest).
+- [ ] Containerize the application using **Docker** for seamless deployment.
 
 ---
-
----
-*Built by Bilal Ahmed*
+*Developed by **Bilal Ahmed***
