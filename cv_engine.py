@@ -1,36 +1,75 @@
 import cv2
 from ultralytics import YOLO
-
+import os, base64, requests
 class CVEngine:
     def __init__(self, model_name='best.pt'):
         """
         Initializes the Computer Vision engine with the specified YOLOv8 model.
+        If the specified model file is not found, falls back to a built‑in YOLOv8 model (e.g., 'yolov8n.pt').
         """
-        print(f"Loading {model_name}...")
+        import os
+        if not os.path.isfile(model_name):
+            print(f"[WARN] Model file '{model_name}' not found. Falling back to default YOLOv8 model 'yolov8n.pt'.")
+            model_name = 'yolov8n.pt'
+        else:
+            print(f"Loading {model_name}...")
         self.model = YOLO(model_name)
 
-    def analyze_image(self, image_path, conf_threshold=0.15):
-        """
-        Takes an image path, runs object detection with a confidence threshold,
-        and returns a summary of findings along with the annotated image array.
-        """
-        print(f"Analyzing {image_path} with confidence threshold {conf_threshold}...")
-        
-        results = self.model(image_path, conf=conf_threshold)
-        
-        annotated_img_rgb = None
-        if len(results) > 0:
-            annotated_img_bgr = results[0].plot()
-            annotated_img_rgb = annotated_img_bgr[..., ::-1]
-            
-        detections = self._parse_and_associate_detections(results)
-        
-        return detections, annotated_img_rgb
+    def analyze_image(self, image_path, conf_threshold=0.6):
+        with open(image_path, "rb") as f:
+            img_b64 = base64.b64encode(f.read()).decode("utf-8")
+
+        r = requests.post(
+            "https://serverless.roboflow.com/hard-hat-detection-4iltu/10",
+            params={"api_key": os.getenv("ROBOFLOW_API_KEY"),
+                    "confidence": int(conf_threshold * 100)},
+            data=img_b64,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            timeout=30,
+        )
+        r.raise_for_status()
+        preds = r.json().get("predictions", [])
+
+        labels = {
+            "Helmet": ("Worker with Helmet", (0, 180, 0)),
+            "NoHelmet": ("Worker WITHOUT Helmet", (0, 0, 255)),
+            "Jacket": ("Hi-vis Vest Worn", (0, 180, 0)),
+            "NoJacket": ("NO Hi-vis Vest", (0, 140, 255)),
+        }
+
+        frame = cv2.imread(image_path)
+        detections = []
+        for p in preds:
+            if p["class"] not in labels:
+                continue
+            label, color = labels[p["class"]]
+            conf = round(p["confidence"] * 100, 2)
+            detections.append({"class": p["class"], "object": label, "confidence": conf})
+
+            x1 = int(p["x"] - p["width"] / 2)
+            y1 = int(p["y"] - p["height"] / 2)
+            x2 = int(p["x"] + p["width"] / 2)
+            y2 = int(p["y"] + p["height"] / 2)
+
+            if frame is not None:
+                cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+                cv2.putText(frame, f"{label} {conf}%", (x1, max(20, y1 - 8)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+        # After processing all predictions, return results
+        # Return the list of detection dictionaries and the annotated frame (RGB).
+        if frame is not None:
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        return detections, frame
 
     @staticmethod
     def _box_center(box):
         x1, y1, x2, y2 = box
         return (x1 + x2) / 2, (y1 + y2) / 2
+
+    @staticmethod
+    def _norm(name):
+        """Normalize class names: lowercase and strip special characters."""
+        return name.lower().replace("_", "").replace("-", "").replace(" ", "")
 
     def _find_matching_gear(self, person, gear_items, used_indexes):
         px1, py1, px2, py2 = person["box"]
@@ -77,11 +116,12 @@ class CVEngine:
                 "track_id": track_id,
             }
             
-            if class_name == "person":
+            key = class_name.lower().replace("_", "").replace("-", "").replace(" ", "")
+            if key == "person":
                 persons.append(det_info)
-            elif class_name == "helmet":
+            elif key == "helmet":
                 helmets.append(det_info)
-            elif class_name in ["no_helmet", "no-helmet"]:
+            elif key == "nohelmet":
                 no_helmets.append(det_info)
             else:
                 detections_list.append({"object": class_name, "confidence": round(confidence * 100, 2)})

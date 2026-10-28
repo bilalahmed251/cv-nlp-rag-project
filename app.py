@@ -19,7 +19,7 @@ st.set_page_config(
 
 @st.cache_resource
 def get_cv_engine():
-    return CVEngine(model_name="yolov8n.pt")
+    return CVEngine(model_name="best.pt")
 
 @st.cache_resource
 def get_rag_engine():
@@ -106,7 +106,6 @@ with col1:
                     image.save(temp_path)
                     
                     detections, annotated_img = cv_engine.analyze_image(temp_path, conf_threshold=conf_threshold)
-                    
                     if annotated_img is not None:
                         st.image(annotated_img, caption="AI Detected Vision", use_container_width=True)
                         

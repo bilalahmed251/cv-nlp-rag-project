@@ -1,6 +1,8 @@
 from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
+import os
+from roboflow import Roboflow
 
 load_dotenv()
 from pydantic import BaseModel
@@ -40,6 +42,8 @@ def startup_event():
         cv_engine = CVEngine()
     nlp_engine = NLPEngine()
     rag_engine = RAGEngine()
+global roboflow_client
+roboflow_client = Roboflow(api_key=os.getenv("ROBOFLOW_API_KEY"))
 
 @app.get("/")
 def read_root():
