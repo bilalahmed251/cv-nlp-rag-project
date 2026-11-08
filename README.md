@@ -69,6 +69,24 @@ streamlit run app.py
 ```
 Navigate to `http://localhost:8501` in your browser to access the system.
 
+## 🎯 Model Training & Evaluation
+
+The custom PPE detection model (`best.pt`) was trained using Ultralytics YOLOv8.
+
+* **Training Notebook:** Available at [`training/Project_Training.ipynb`](training/Project_Training.ipynb) for full reproducibility.
+* **Base Architecture:** YOLOv8 Nano (`yolov8n.pt`), 50 epochs, AdamW optimizer (`imgsz=640`).
+* **Fast Training Turnaround:** Full retraining takes only ~8 minutes on a standard Google Colab T4 GPU.
+
+### 📊 Performance & Calibration
+* **Overall Metrics:** `mAP50: 0.85`, `Precision: 0.93`, `F1-Score: 0.82 at 0.444 confidence`.
+* **Known Limitation:** `NoHelmet recall 0.58-0.73, small test set.` (At standard confidence, Precision is 0.96 while Recall is ~0.58 with mAP50 of 0.73).
+* **Threshold Recommendation:** In production safety auditing, missing a violation (false negative) is costlier than a minor false alarm. Lowering the detection confidence threshold to `0.35 – 0.40` significantly improves `NoHelmet` recall.
+* **Future Optimization:** While deployment and core pipeline stability are prioritized first, future retraining iterations can scale to `yolov8s` or 100 epochs with augmented hard negative mining to drive `NoHelmet` recall above 0.85+.
+
+## 📜 Dataset Attribution (CC BY 4.0)
+
+This project utilizes the **Hard Hat Detection** dataset (`hard-hat-detection-4iltu`) hosted on [Roboflow Universe](https://universe.roboflow.com/melnikdm/hard-hat-detection-4iltu/dataset/10), originally created and shared by **melnikdm** under the **Creative Commons Attribution 4.0 International (CC BY 4.0)** license.
+
 ## 🗺️ Roadmap (Upcoming Features)
 
 - [ ] Transition from FAISS to **ChromaDB** for persistent vector storage.
