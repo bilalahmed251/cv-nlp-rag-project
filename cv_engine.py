@@ -1,19 +1,15 @@
 import cv2
 from ultralytics import YOLO
 import os, base64, requests
+from pathlib import Path
 class CVEngine:
-    def __init__(self, model_name='best.pt'):
-        """
-        Initializes the Computer Vision engine with the specified YOLOv8 model.
-        If the specified model file is not found, falls back to a built‑in YOLOv8 model (e.g., 'yolov8n.pt').
-        """
-        import os
-        if not os.path.isfile(model_name):
-            print(f"[WARN] Model file '{model_name}' not found. Falling back to default YOLOv8 model 'yolov8n.pt'.")
-            model_name = 'yolov8n.pt'
-        else:
-            print(f"Loading {model_name}...")
-        self.model = YOLO(model_name)
+    def __init__(self, model_name="best.pt"):
+        path = Path(model_name)
+        if not path.is_absolute():
+            path = Path(__file__).parent / path
+        if not path.is_file():
+            raise FileNotFoundError(f"Model not found: {path}")
+        self.model = YOLO(str(path))
 
     def analyze_image(self, image_path, conf_threshold=0.6):
         with open(image_path, "rb") as f:
@@ -60,6 +56,23 @@ class CVEngine:
         if frame is not None:
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         return detections, frame
+
+    def analyze_image_local(self, image_path, conf_threshold=0.4):
+        """
+        Analyze a local image using the YOLO model.
+        Returns detections, workers, and an annotated RGB image.
+        """
+        frame = cv2.imread(image_path)
+        if frame is None:
+            raise ValueError(f"Cannot read image: {image_path}")
+        results = self.model.predict(frame, conf=conf_threshold, imgsz=640, verbose=False)
+        detections, workers = self._build_compliance_data(results)
+        rename = {"Jacket": "Hi-vis Vest Worn", "NoJacket": "NO Hi-vis Vest"}
+        for d in detections:
+            d["object"] = rename.get(d["object"], d["object"])
+        # Convert BGR to RGB after plotting (plot returns BGR)
+        annotated_rgb = results[0].plot()[..., ::-1]
+        return detections, workers, annotated_rgb
 
     @staticmethod
     def _box_center(box):

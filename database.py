@@ -134,3 +134,23 @@ def get_recent_logs(limit=20):
         df = pd.DataFrame()
     conn.close()
     return df
+def log_static_incident(worker_id, status, frame_rgb):
+    """One-shot log for a single uploaded image: opens and closes immediately."""
+    os.makedirs(VIOLATIONS_DIR, exist_ok=True)
+    now = datetime.now()
+    filepath = os.path.join(
+        VIOLATIONS_DIR, f"worker_{worker_id}_{now.strftime('%Y%m%d_%H%M%S_%f')}.jpg"
+    )
+    cv2.imwrite(filepath, cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR))
+    t = now.strftime("%Y-%m-%d %H:%M:%S")
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        cur = conn.execute(
+            "INSERT INTO continuous_incidents_v2 (worker_id, violation_type, started_at, last_seen_at, ended_at, duration_seconds, incident_state, screenshot_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (worker_id, status, t, t, t, 0, "CLOSED", filepath),
+        )
+        conn.commit()
+        return cur.lastrowid
+    finally:
+        conn.close()
+

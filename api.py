@@ -1,16 +1,22 @@
-from fastapi import FastAPI, File, UploadFile
-from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
-import os
-from roboflow import Roboflow
-
 load_dotenv()
+
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+import os
+import shutil
+import tempfile
+from pathlib import Path
+
+
 from pydantic import BaseModel
 import database
 import shutil
 from cv_engine import CVEngine
 from nlp_engine import NLPEngine
 from rag_engine import RAGEngine
+
+ALLOWED = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 
 cv_engine = None
 nlp_engine = None
@@ -42,8 +48,7 @@ def startup_event():
         cv_engine = CVEngine()
     nlp_engine = NLPEngine()
     rag_engine = RAGEngine()
-global roboflow_client
-roboflow_client = Roboflow(api_key=os.getenv("ROBOFLOW_API_KEY"))
+
 
 @app.get("/")
 def read_root():
@@ -56,20 +61,30 @@ def get_incident_logs():
     logs_list = df.to_dict(orient="records")
     return {"status": "success", "total": len(logs_list), "data": logs_list}
 
-@app.post("/api/analyze-image")
-def analyze_image(file: UploadFile = File(...)):
-    """Receives an image and returns YOLO detections."""
-    temp_path = f"temp_{file.filename}"
-    with open(temp_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-        
-    detections, _ = cv_engine.analyze_image(temp_path)
-    
-    return {
-        "status": "success", 
-        "filename": file.filename, 
-        "detections": detections
-    }
+@app.post("/api/analyze")
+def analyze(file: UploadFile = File(...),
+            user_query: str = Form("Is this worker compliant with the safety policy?")):
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix not in ALLOWED:
+        raise HTTPException(400, "Upload a JPG, PNG, BMP or WEBP image.")
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+    try:
+        with tmp:
+            shutil.copyfileobj(file.file, tmp)
+        detections, workers, frame = cv_engine.analyze_image_local(tmp.name)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    finally:
+        os.unlink(tmp.name)
+
+    policy_context = rag_engine.query_policies(user_query, top_k=4)
+    report = nlp_engine.analyze_compliance(user_query, detections, policy_context)
+    incident_ids = [
+        database.log_static_incident(w["worker_id"], w["status"], frame)
+        for w in workers if w["status"].startswith("VIOLATION")
+    ]
+    return {"status": "success", "filename": file.filename, "detections": detections,
+            "workers": workers, "report": report, "incident_ids": incident_ids}
 
 @app.post("/api/ask-agent")
 def ask_agent(request: AgentRequest):
