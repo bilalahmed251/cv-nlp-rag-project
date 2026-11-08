@@ -13,3 +13,13 @@ incidents.db
 violations_screenshots/
 temp_*
 __pycache__/
+
+.video_tools/
+runs/
+chroma_data/
+validation/
+validation.yaml
+Helmet Detection.v1i.yolov8/
+Hard-Hat-Detection-10/
+*.zip
+!best.pt
