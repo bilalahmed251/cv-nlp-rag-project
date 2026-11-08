@@ -7,3 +7,9 @@ venv/
 *.pt
 Concept_Sheet.md
 Techniques.md
+
+.env
+incidents.db
+violations_screenshots/
+temp_*
+__pycache__/
