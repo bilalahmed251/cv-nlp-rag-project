@@ -20,11 +20,10 @@ GRACE_PERIOD_SECONDS = TRACK_BUFFER_FRAMES / VIDEO_FPS # e.g., 1.0 seconds
 active_incidents = {}
 
 def init_db():
-    """Creates the folder and database table for continuous tracking."""
+    """Creates the folder and database table for continuous tracking and human review."""
     os.makedirs(VIOLATIONS_DIR, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    # Nayi table jisme requirement ke mutabiq exact columns hain
     c.execute('''
         CREATE TABLE IF NOT EXISTS continuous_incidents_v2 (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -35,9 +34,21 @@ def init_db():
             ended_at DATETIME,
             duration_seconds INTEGER,
             incident_state TEXT,
-            screenshot_path TEXT
+            screenshot_path TEXT,
+            review_status TEXT DEFAULT 'PENDING_REVIEW',
+            reviewer_notes TEXT,
+            reviewed_at DATETIME
         )
     ''')
+    # Column migration for existing tables
+    c.execute("PRAGMA table_info(continuous_incidents_v2)")
+    existing_cols = [col[1] for col in c.fetchall()]
+    if 'review_status' not in existing_cols:
+        c.execute("ALTER TABLE continuous_incidents_v2 ADD COLUMN review_status TEXT DEFAULT 'PENDING_REVIEW'")
+    if 'reviewer_notes' not in existing_cols:
+        c.execute("ALTER TABLE continuous_incidents_v2 ADD COLUMN reviewer_notes TEXT")
+    if 'reviewed_at' not in existing_cols:
+        c.execute("ALTER TABLE continuous_incidents_v2 ADD COLUMN reviewed_at DATETIME")
     conn.commit()
     conn.close()
 
@@ -146,11 +157,39 @@ def log_static_incident(worker_id, status, frame_rgb):
     conn = sqlite3.connect(DB_PATH)
     try:
         cur = conn.execute(
-            "INSERT INTO continuous_incidents_v2 (worker_id, violation_type, started_at, last_seen_at, ended_at, duration_seconds, incident_state, screenshot_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (worker_id, status, t, t, t, 0, "CLOSED", filepath),
+            "INSERT INTO continuous_incidents_v2 (worker_id, violation_type, started_at, last_seen_at, ended_at, duration_seconds, incident_state, screenshot_path, review_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (worker_id, status, t, t, t, 0, "CLOSED", filepath, "PENDING_REVIEW"),
         )
         conn.commit()
         return cur.lastrowid
     finally:
         conn.close()
+
+def get_pending_reviews(limit=50):
+    """Returns incidents awaiting human supervisor review (HITL queue)."""
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        df = pd.read_sql_query(
+            "SELECT * FROM continuous_incidents_v2 WHERE review_status = 'PENDING_REVIEW' ORDER BY started_at DESC LIMIT ?",
+            conn, params=(limit,)
+        )
+        return df.to_dict(orient="records")
+    finally:
+        conn.close()
+
+def update_incident_review(incident_id: int, review_status: str, reviewer_notes: str = ""):
+    """Updates the supervisor's verdict (e.g. CONFIRMED_VIOLATION or DISMISSED_FALSE_ALARM)."""
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE continuous_incidents_v2 SET review_status = ?, reviewer_notes = ?, reviewed_at = ? WHERE id = ?",
+            (review_status, reviewer_notes, now_str, incident_id)
+        )
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        conn.close()
+
 

@@ -5,6 +5,7 @@
 1.2 Penalties for Non-Compliance: Failure to wear a safety helmet will result in an immediate fine of $50 for the first offense, and removal from the job site for repeated violations.
 1.3 High-Visibility Vests: High-visibility reflective vests must be worn in areas with operating heavy machinery or vehicles.
 1.4 Safety Eyewear & Footwear: Steel-toed boots and protective eye goggles are required when welding, drilling, or cutting materials.
+1.5 Designated Safe Rest Zones (Geofencing Policy): Personnel located inside demarcated and verified Safe Rest Zones (such as break areas, canteen stations, or marked pedestrian zones) are explicitly exempt from the mandatory safety helmet and high-visibility vest requirements. Temporary removal of PPE within a designated Safe Zone does NOT constitute a safety violation and is classified as COMPLIANT under safe zone exemption.
 
 ## SECTION 2: Hazard Communication & Risk Protocol
 2.1 Risk Levels:

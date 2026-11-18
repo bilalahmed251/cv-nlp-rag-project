@@ -57,22 +57,75 @@ class CVEngine:
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         return detections, frame
 
-    def analyze_image_local(self, image_path, conf_threshold=0.4):
+    def analyze_image_local(self, image_path, conf_threshold=0.4, safe_zones=None, blur_faces=False):
         """
         Analyze a local image using the YOLO model.
+        Supports Geofencing (Safe Zones) and PII Privacy (Face Blurring).
         Returns detections, workers, and an annotated RGB image.
         """
+        import numpy as np
         frame = cv2.imread(image_path)
         if frame is None:
             raise ValueError(f"Cannot read image: {image_path}")
         results = self.model.predict(frame, conf=conf_threshold, imgsz=640, verbose=False)
-        detections, workers = self._build_compliance_data(results)
+        detections, workers = self._build_compliance_data(results, safe_zones=safe_zones)
         rename = {"Jacket": "Hi-vis Vest Worn", "NoJacket": "NO Hi-vis Vest"}
         for d in detections:
             d["object"] = rename.get(d["object"], d["object"])
-        # Convert BGR to RGB after plotting (plot returns BGR)
-        annotated_rgb = results[0].plot()[..., ::-1]
+            
+        # Base annotated frame in BGR
+        annotated_bgr = results[0].plot()
+
+        # Render Safe Zones on image with translucent green fill
+        if safe_zones:
+            overlay = annotated_bgr.copy()
+            for zone in safe_zones:
+                pts = np.array(zone, dtype=np.int32)
+                cv2.fillPoly(overlay, [pts], (0, 180, 0)) # Green fill
+                cv2.polylines(annotated_bgr, [pts], isClosed=True, color=(0, 255, 0), thickness=2)
+                # Text label
+                label_x = max(10, int(pts[:, 0].min()))
+                label_y = max(25, int(pts[:, 1].min()) - 8)
+                cv2.putText(annotated_bgr, "SAFE REST ZONE (PPE Exempt)", (label_x, label_y),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+            cv2.addWeighted(overlay, 0.25, annotated_bgr, 0.75, 0, annotated_bgr)
+
+        # Anonymize faces for PII / Privacy if requested
+        if blur_faces:
+            for w in workers:
+                self.anonymize_worker_face(annotated_bgr, w["box"])
+
+        # Convert BGR to RGB
+        annotated_rgb = annotated_bgr[..., ::-1]
         return detections, workers, annotated_rgb
+
+    @staticmethod
+    def anonymize_worker_face(frame, box):
+        """Blurs the upper head/face region of a worker bounding box for PII compliance."""
+        x1, y1, x2, y2 = [int(v) for v in box]
+        h, w = frame.shape[:2]
+        x1, y1, x2, y2 = max(0, x1), max(0, y1), min(w, x2), min(h, y2)
+        box_h = y2 - y1
+        if box_h > 15 and (x2 - x1) > 15:
+            face_y2 = min(y2, y1 + int(box_h * 0.35))
+            face_roi = frame[y1:face_y2, x1:x2]
+            if face_roi.size > 0:
+                blurred = cv2.GaussianBlur(face_roi, (25, 25), 15)
+                frame[y1:face_y2, x1:x2] = blurred
+        return frame
+
+    @staticmethod
+    def _is_point_in_safe_zone(point, safe_zones):
+        """Checks if a 2D (x, y) point is inside any configured safe zone polygon."""
+        if not safe_zones:
+            return False
+        import numpy as np
+        px, py = float(point[0]), float(point[1])
+        for zone in safe_zones:
+            pts = np.array(zone, dtype=np.int32)
+            if cv2.pointPolygonTest(pts, (px, py), False) >= 0:
+                return True
+        return False
 
     @staticmethod
     def _box_center(box):
@@ -103,9 +156,9 @@ class CVEngine:
         _, index, gear = min(candidates, key=lambda candidate: candidate[0])
         return index, gear
 
-    def _build_compliance_data(self, results):
+    def _build_compliance_data(self, results, safe_zones=None):
         """
-        Associate helmet detections with person boxes and evaluate compliance.
+        Associate helmet detections with person boxes, evaluate geofenced zones, and compliance.
         """
         detections_list = []
         persons = []
@@ -150,19 +203,31 @@ class CVEngine:
                 )
                 helmet_index, helmet = self._find_matching_gear(person, helmets, used_helmets)
 
+                px1, py1, px2, py2 = person["box"]
+                worker_foot_pos = ((px1 + px2) / 2, py2)
+                is_safe = self._is_point_in_safe_zone(worker_foot_pos, safe_zones)
+                zone_label = "SAFE_ZONE" if is_safe else "DANGER_ZONE"
+
                 worker_id = person["track_id"] if person["track_id"] is not None else worker_number
                 worker = {
                     "worker_id": worker_id,
                     "person_confidence": round(person["conf"] * 100, 2),
                     "box": person["box"],
+                    "zone": zone_label,
                 }
 
                 if no_helmet:
                     used_no_helmets.add(no_helmet_index)
-                    worker.update({
-                        "status": "VIOLATION: Helmet Missing",
-                        "equipment_confidence": round(no_helmet["conf"] * 100, 2),
-                    })
+                    if is_safe:
+                        worker.update({
+                            "status": "COMPLIANT: Safe Zone Exemption",
+                            "equipment_confidence": round(no_helmet["conf"] * 100, 2),
+                        })
+                    else:
+                        worker.update({
+                            "status": "VIOLATION: Helmet Missing",
+                            "equipment_confidence": round(no_helmet["conf"] * 100, 2),
+                        })
                 elif helmet:
                     used_helmets.add(helmet_index)
                     worker.update({
@@ -183,19 +248,31 @@ class CVEngine:
         else:
             for idx, h in enumerate(helmets, start=1):
                 detections_list.append({"object": "Worker with Helmet", "confidence": round(h["conf"] * 100, 2)})
+                h_pos = ((h["box"][0] + h["box"][2]) / 2, h["box"][3])
+                is_safe = self._is_point_in_safe_zone(h_pos, safe_zones)
                 workers.append({
                     "worker_id": h.get("track_id") or f"H{idx}",
                     "status": "COMPLIANT: Helmet Detected",
                     "equipment_confidence": round(h["conf"] * 100, 2),
-                    "box": h["box"]
+                    "box": h["box"],
+                    "zone": "SAFE_ZONE" if is_safe else "DANGER_ZONE"
                 })
             for idx, nh in enumerate(no_helmets, start=1):
-                detections_list.append({"object": "Worker WITHOUT Helmet", "confidence": round(nh["conf"] * 100, 2)})
+                nh_pos = ((nh["box"][0] + nh["box"][2]) / 2, nh["box"][3])
+                is_safe = self._is_point_in_safe_zone(nh_pos, safe_zones)
+                if is_safe:
+                    status = "COMPLIANT: Safe Zone Exemption"
+                    detections_list.append({"object": "Worker WITHOUT Helmet (Safe Zone Exemption)", "confidence": round(nh["conf"] * 100, 2)})
+                else:
+                    status = "VIOLATION: Helmet Missing"
+                    detections_list.append({"object": "Worker WITHOUT Helmet", "confidence": round(nh["conf"] * 100, 2)})
+
                 workers.append({
                     "worker_id": nh.get("track_id") or f"NH{idx}",
-                    "status": "VIOLATION: Helmet Missing",
+                    "status": status,
                     "equipment_confidence": round(nh["conf"] * 100, 2),
-                    "box": nh["box"]
+                    "box": nh["box"],
+                    "zone": "SAFE_ZONE" if is_safe else "DANGER_ZONE"
                 })
                 
         return detections_list, workers
