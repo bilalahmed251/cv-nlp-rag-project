@@ -105,7 +105,7 @@ with col1:
                     temp_path = "temp_uploaded.jpg"
                     image.save(temp_path)
                     
-                    detections, annotated_img = cv_engine.analyze_image(temp_path, conf_threshold=conf_threshold)
+                    detections, _, annotated_img = cv_engine.analyze_image_local(temp_path, conf_threshold=conf_threshold)
                     if annotated_img is not None:
                         st.image(annotated_img, caption="AI Detected Vision", use_container_width=True)
                         
@@ -185,7 +185,7 @@ with col2:
                     if not is_video:
                         temp_path = "temp_uploaded.jpg"
                         Image.open(uploaded_file).save(temp_path)
-                        detections, _ = cv_engine.analyze_image(temp_path, conf_threshold=conf_threshold)
+                        detections, _, _ = cv_engine.analyze_image_local(temp_path, conf_threshold=conf_threshold)
                     else:
                         temp_path = "temp_uploaded." + file_ext
                         with open(temp_path, "wb") as f:
