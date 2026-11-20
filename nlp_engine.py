@@ -45,8 +45,8 @@ class NLPEngine:
             self.client = None
 
     def _generate(self, prompt: str, retries: int = 3) -> str:
-        primary_model = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
-        fallback_model = os.getenv("GEMINI_FALLBACK_MODEL", "gemini-2.5-flash")
+        primary_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+        fallback_model = os.getenv("GEMINI_FALLBACK_MODEL", "gemini-2.5-flash-lite")
         
         models_to_try = []
         if primary_model: models_to_try.append(primary_model)
