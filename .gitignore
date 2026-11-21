@@ -10,6 +10,8 @@ Techniques.md
 
 .env
 incidents.db
+incidents_backup.db
+*.db
 violations_screenshots/
 temp_*
 __pycache__/
